@@ -248,21 +248,20 @@ const fragmentShader = `
             }
         }
         
-        // Preserve original lightness, but use the new color's hue and saturation.
-        float originalLightness = getLuminance(texColor.rgb);
-
+        // With a flat-colored source image, we no longer need to preserve lightness.
+        // We can just swap the color directly.
         if (min_idx == 0) { // Face/Skin
-            if (min_dist < uThresholdFace * 0.1) finalColor = uColorFace * originalLightness;
+            if (min_dist < uThresholdFace * 0.1) finalColor = uColorFace;
         } else if (min_idx == 1) { // Armour/Weapon
-            if (min_dist < uThresholdArmour * 0.1) finalColor = uColorArmour * originalLightness;
+            if (min_dist < uThresholdArmour * 0.1) finalColor = uColorArmour;
         } else if (min_idx == 2) { // Trim
-            if (min_dist < uThresholdTrim * 0.1) finalColor = uColorTrim * originalLightness;
+            if (min_dist < uThresholdTrim * 0.1) finalColor = uColorTrim;
         } else if (min_idx == 3) { // Hair
-            if (min_dist < uThresholdHair * 0.08) finalColor = uColorHair * originalLightness;
+            if (min_dist < uThresholdHair * 0.08) finalColor = uColorHair;
         } else if (min_idx == 4) { // Outline
             // Special handling for outlines - check lightness/saturation
             if (texHSL.z < (0.2 * uThresholdOutline) || texHSL.s < (0.1 * uThresholdOutline)) {
-                finalColor = uColorOutline * originalLightness;
+                finalColor = uColorOutline;
             }
         }
 
