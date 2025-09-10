@@ -27,6 +27,47 @@ const fragmentShader = `
 
     uniform bool uCleanPixels;
 
+    // --- HSL Color Space Conversion ---
+    // Converts an RGB color value to HSL. Conversion formula
+    // adapted from http://en.wikipedia.org/wiki/HSL_color_space.
+    // Assumes r, g, and b are contained in the set [0, 1] and
+    // returns h, s, and l in the set [0, 1].
+    vec3 rgb2hsl(vec3 color) {
+        float max_val = max(max(color.r, color.g), color.b);
+        float min_val = min(min(color.r, color.g), color.b);
+        float h = 0.0, s = 0.0, l = (max_val + min_val) / 2.0;
+
+        if (max_val == min_val) {
+            h = s = 0.0; // achromatic
+        } else {
+            float d = max_val - min_val;
+            s = l > 0.5 ? d / (2.0 - max_val - min_val) : d / (max_val + min_val);
+            if (max_val == color.r) {
+                h = (color.g - color.b) / d + (color.g < color.b ? 6.0 : 0.0);
+            } else if (max_val == color.g) {
+                h = (color.b - color.r) / d + 2.0;
+            } else { // max_val == color.b
+                h = (color.r - color.g) / d + 4.0;
+            }
+            h /= 6.0;
+        }
+        return vec3(h, s, l);
+    }
+
+    // --- HSL Palette (using Hue values) ---
+    // Hues are in range [0, 1] (0 = red, 0.16 = yellow, 0.33 = green, 0.66 = blue, etc.)
+    const float HUE_HAIR    = 0.0;  // Red
+    const float HUE_FACE    = 0.08; // Orange/Yellow (Skin)
+    const float HUE_TRIM    = 0.14; // Yellow/Gold
+    const float HUE_ARMOUR  = 0.58; // Blue
+    const float HUE_OUTLINE = 0.0;  // For black/grey, hue is irrelevant, we check lightness
+
+    // Function to calculate the shortest distance between two hues on a color wheel
+    float hue_dist(float h1, float h2) {
+        float d = abs(h1 - h2);
+        return min(d, 1.0 - d);
+    }
+    
     // Palette based on the new source image
     // These are representative colors from the shaded regions
     const vec3 PALETTE_FACE    = vec3(0.91, 0.75, 0.67); // Skin tone (e.g., #E8BEAC)
@@ -187,24 +228,19 @@ const fragmentShader = `
         }
 
         vec3 finalColor = texColor.rgb;
+        vec3 texHSL = rgb2hsl(texColor.rgb);
 
-        vec3 colors[5];
-        colors[0] = PALETTE_FACE;
-        colors[1] = PALETTE_ARMOUR;
-        colors[2] = PALETTE_TRIM;
-        colors[3] = PALETTE_HAIR;
-        colors[4] = PALETTE_OUTLINE;
-
+        // HSL-based mapping
         float dists[5];
-        dists[0] = distance(texColor.rgb, colors[0]);
-        dists[1] = distance(texColor.rgb, colors[1]);
-        dists[2] = distance(texColor.rgb, colors[2]);
-        dists[3] = distance(texColor.rgb, colors[3]);
-        dists[4] = distance(texColor.rgb, colors[4]);
-        
+        dists[0] = hue_dist(texHSL.x, HUE_FACE);   // Face
+        dists[1] = hue_dist(texHSL.x, HUE_ARMOUR); // Armour
+        dists[2] = hue_dist(texHSL.x, HUE_TRIM);   // Trim
+        dists[3] = hue_dist(texHSL.x, HUE_HAIR);   // Hair
+        dists[4] = texHSL.z < 0.2 ? 0.0 : 1.0;     // Outline (prioritize dark pixels)
+
+        // Find the minimum distance to a hue
         float min_dist = 10.0;
         int min_idx = -1;
-
         for (int i = 0; i < 5; i++) {
             if (dists[i] < min_dist) {
                 min_dist = dists[i];
@@ -212,19 +248,22 @@ const fragmentShader = `
             }
         }
         
-        // New shading logic
-        float luminance = getLuminance(texColor.rgb);
+        // Preserve original lightness, but use the new color's hue and saturation.
+        float originalLightness = getLuminance(texColor.rgb);
 
         if (min_idx == 0) { // Face/Skin
-            if (min_dist < uThresholdFace) finalColor = uColorFace * luminance;
+            if (min_dist < uThresholdFace * 0.1) finalColor = uColorFace * originalLightness;
         } else if (min_idx == 1) { // Armour/Weapon
-            if (min_dist < uThresholdArmour) finalColor = uColorArmour * luminance;
+            if (min_dist < uThresholdArmour * 0.1) finalColor = uColorArmour * originalLightness;
         } else if (min_idx == 2) { // Trim
-            if (min_dist < uThresholdTrim) finalColor = uColorTrim * luminance;
+            if (min_dist < uThresholdTrim * 0.1) finalColor = uColorTrim * originalLightness;
         } else if (min_idx == 3) { // Hair
-            if (min_dist < uThresholdHair) finalColor = uColorHair * luminance;
+            if (min_dist < uThresholdHair * 0.08) finalColor = uColorHair * originalLightness;
         } else if (min_idx == 4) { // Outline
-            if (min_dist < uThresholdOutline) finalColor = uColorOutline * luminance;
+            // Special handling for outlines - check lightness/saturation
+            if (texHSL.z < (0.2 * uThresholdOutline) || texHSL.s < (0.1 * uThresholdOutline)) {
+                finalColor = uColorOutline * originalLightness;
+            }
         }
 
         gl_FragColor = vec4(finalColor, texColor.a);
